@@ -1,5 +1,5 @@
-from app.scraper.scraper_service import ScraperService
-from app.scraper.brightdata_browser import BrightDataBrowser
+from app.services.scraper_service import ScraperService
+from app.browser.brightdata_browser import BrightDataBrowser
 from app.config.settings import settings
 
 def get_scraper_service() -> ScraperService:

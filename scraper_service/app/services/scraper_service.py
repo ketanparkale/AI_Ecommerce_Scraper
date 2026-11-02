@@ -2,7 +2,7 @@ import asyncio
 from urllib.parse import urlparse, parse_qs, urlencode
 
 from fastapi import HTTPException
-from app.scraper.brightdata_browser import BrightDataBrowser
+from app.browser.brightdata_browser import BrightDataBrowser
 from app.scraper.flipkart_scraper import FlipkartScraper
 from app.models.product_response import (
     ProductResponse, ColorVariant, SizeVariant

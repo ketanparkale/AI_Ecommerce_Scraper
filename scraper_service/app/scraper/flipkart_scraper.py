@@ -1,4 +1,4 @@
-from .brightdata_browser import BrightDataBrowser
+from app.browser.brightdata_browser import BrightDataBrowser
 from urllib.parse import urlparse, parse_qs
 
 PRICE_JS = r"""
