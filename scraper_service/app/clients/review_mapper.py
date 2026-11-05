@@ -22,10 +22,7 @@ class ReviewsNotReady(ValueError):
     The client can catch this and keep polling.
     """
 
-
-# ---------------------------------------------------------------------------
 # Text / date helpers
-# ---------------------------------------------------------------------------
 
 def clean_text(value: Any) -> str | None:
     """Decode HTML entities (&quot;, &hellip;) and strip outer whitespace."""
@@ -72,9 +69,9 @@ def parse_date(value: Any) -> date | None:
         return None
 
 
-# ---------------------------------------------------------------------------
+
 # Review extraction
-# ---------------------------------------------------------------------------
+
 
 def extract_reviews(raw: dict) -> list[dict]:
     data = raw.get("data") or {}
@@ -139,9 +136,8 @@ def map_review(item: dict) -> Review:
     )
 
 
-# ---------------------------------------------------------------------------
+
 # Rating helpers
-# ---------------------------------------------------------------------------
 
 def map_product_rating(pr_data: Any) -> ProductRating | None:
     if not isinstance(pr_data, dict) or not pr_data:
@@ -164,9 +160,8 @@ def map_product_rating(pr_data: Any) -> ProductRating | None:
     )
 
 
-# ---------------------------------------------------------------------------
+
 # Main mapper
-# ---------------------------------------------------------------------------
 
 def map_review_response(raw: dict) -> ReviewResponse:
     if raw.get("status") != "SUCCESS":
