@@ -1,9 +1,10 @@
 import httpx
 from app.config.settings import settings
-from app.models.scraper_models import ProductResponse
+from agent_service.app.models.product_models import ProductResponse
+from app.clients.base_scraper_client import BaseScraperClient
 
-class ScraperClient:
-    async def scrape_product(self,product_url:str) -> ProductResponse:
+class ProductScraperClient(BaseScraperClient[ProductResponse]):
+    async def scrape(self,product_url:str) -> ProductResponse:
 
         async with httpx.AsyncClient(timeout=120) as client:
             response = await client.get(

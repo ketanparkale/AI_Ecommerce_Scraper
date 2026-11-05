@@ -1,19 +1,23 @@
-from langchain_protocol import Any
+from typing import Any
+from agent_service.app.clients.base_scraper_client import BaseScraperClient
+from agent_service.app.models.product_models import ProductResponse
+from app.tools.base_tool import BaseTool
 
-from app.clients.scraper_client import ScraperClient
-from app.models.scraper_models import ProductResponse
+class ProductTool(BaseTool):
 
-class ProductTool:
+    def __init__(self,scraper_client:BaseScraperClient[ProductResponse]):
+        self._client = scraper_client
 
-    def __init__(self,scraper_client:ScraperClient):
-        self.scraper_client = scraper_client
+    @property
+    def name(self) -> str:
+        return "get_product_details"
 
     @property
     def definition(self) -> dict[str, Any]:
         return {
             "type": "function",
             "function": {
-                "name": "get_product_details",
+                "name": self.name,
                 "description": (
                     "Retrieve product details from a Flipkart product URL, "
                     "including the product title, brand, colors, sizes, "
@@ -34,5 +38,6 @@ class ProductTool:
             }
         }
 
-    async def execute(self, product_url: str) -> ProductResponse:
-        return await self.scraper_client.scrape_product(product_url)
+    async def _run(self, product_url: str) -> str:
+        product = await self._client.execute(product_url)
+        return product.model_dump_json(exclude_none=True)

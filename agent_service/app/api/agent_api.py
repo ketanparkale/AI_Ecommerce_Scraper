@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends
 
 from app.agents.product_agent import ProductAgent
 from app.llm.local_llm import LocalLLM
-from app.clients.scraper_client import ScraperClient
+from agent_service.app.clients.product_scraper_client import ScraperClient
 from app.tools.product_tool import ProductTool
 from app.models.api_models import AgentRequest, AgentResponse
 import logging

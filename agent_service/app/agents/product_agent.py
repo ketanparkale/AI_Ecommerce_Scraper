@@ -3,6 +3,7 @@ import json
 import logging
 from typing import Any
  
+from app.tools.base_tool import BaseTool
 from app.llm.base import BaseLLM
  
 logger = logging.getLogger(__name__)
@@ -18,24 +19,29 @@ SYSTEM_PROMPT = (
 SYNTHESIS_SYSTEM_PROMPT = "You are an ecommerce assistant."
  
 EMPTY_ANSWER_MESSAGE = "I retrieved the product data but couldn't summarize it."
+
 NO_DATA_MESSAGE = "I couldn't find any product data to answer that."
  
  
 class ProductAgent:
+
     def __init__(
         self,
         llm: BaseLLM,
-        tools: list[Any],
+        tools: list[BaseTool],
         max_iterations: int = 5,
     ):
         self.llm = llm
+        
         self.max_iterations = max_iterations
+
         self.tools = {
-            tool.definition["function"]["name"]: tool
+            tool.name: tool
             for tool in tools
         }
  
     async def run(self, user_message: str) -> dict[str, Any]:
+
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
@@ -46,6 +52,7 @@ class ProductAgent:
         limit_reached = False
 
         # for-else: runs only if the loop ended without break
+
         for iteration in range(self.max_iterations):
             response = await self.llm.generate(
                 messages=messages,
@@ -57,6 +64,7 @@ class ProductAgent:
             )
  
             # No tool calls: the model is either done or returned nothing.
+
             if not response.tool_calls:
                 text = (response.text or "").strip()
                 if text:
@@ -64,6 +72,7 @@ class ProductAgent:
                 break
  
             # Record the assistant's tool calls in the conversation.
+
             messages.append({
                 "role": "assistant",
                 "content": response.text or "",
@@ -81,6 +90,7 @@ class ProductAgent:
             })
  
             # Run each tool and feed its result back to the model.
+
             for call in response.tool_calls:
                 result = await self._run_tool(call)
                 all_results.append({"tool": call.name, "result": result})
@@ -95,23 +105,30 @@ class ProductAgent:
  
         answer = await self._synthesize(user_message, all_results)
         return self._result(answer, all_results, limit_reached)
+
  
     async def _run_tool(self, call) -> Any:
+
         tool = self.tools.get(call.name)
         if tool is None:
             return {"error": f"Unknown tool {call.name}"}
  
         try:
+
             result = await tool.execute(**call.arguments)
             return result.model_dump() if hasattr(result, "model_dump") else result
+        
         except Exception:
+
             logger.exception("Tool %s failed", call.name)
             return {
                 "error": f"Tool '{call.name}' failed. The operation could not be completed."
             }
+
  
     async def _synthesize(self, user_message: str, all_results: list[dict[str, Any]]) -> str:
         """Turn raw tool results into a natural-language answer (no tools allowed)."""
+
         if not all_results:
             return NO_DATA_MESSAGE
  
@@ -123,6 +140,7 @@ class ProductAgent:
             "Do not invent sizes, prices or availability. "
             "If the data looks incomplete or contains an error, say so."
         )
+
         response = await self.llm.generate(
             messages=[
                 {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
@@ -130,7 +148,9 @@ class ProductAgent:
             ],
             tools=None,
         )
+
         return (response.text or "").strip() or EMPTY_ANSWER_MESSAGE
+
  
     @staticmethod
     def _result(
