@@ -3,11 +3,14 @@ import asyncio
 from fastapi import HTTPException
 from typing import TypeVar, Generic
 
+import httpx
+
 from app.scraper.base_scraper import BaseScraper
 
 T = TypeVar("T")
 
-RETRYABLE = ("no_peers", "Timeout", "ERR_", "Target closed")
+RETRYABLE = (httpx.TransportError, httpx.TimeoutException, TimeoutError)
+# retry only if isinstance(exc, RETRYABLE); otherwise raise immediately
 
 
 class ScraperService(Generic[T]):

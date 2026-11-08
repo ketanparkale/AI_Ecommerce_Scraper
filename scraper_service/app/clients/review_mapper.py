@@ -1,31 +1,25 @@
 import html
+import re
 from datetime import date, datetime
 from typing import Any
 
-from app.models.review_response import (
-    ReviewResponse,
-    Brand,
-    Author,
-    Review,
-    ReviewRating,
-    AggregateRating,
-    ParameterRating,
-    StarCount,
-    ProductRating,
-    ZembraUsage,
-)
+from app.models.review_response import Review, ReviewResponse, ZembraUsage
 
 
-class ReviewsNotReady(ValueError):
-    """Raised while the Zembra job is still collecting reviews.
+# --------------------------------------------------
+# Helpers
+# --------------------------------------------------
 
-    The client can catch this and keep polling.
-    """
+def extract_product_id(url: str) -> str:
+    """Flipkart product id from the URL path, e.g. 'itm1ff0105e41af8'."""
+    match = re.search(r"/p/(itm[a-z0-9]+)", url, re.I)
+    if not match:
+        raise ValueError("Could not find Flipkart product id in URL")
+    return match.group(1).lower()
 
-# Text / date helpers
 
 def clean_text(value: Any) -> str | None:
-    """Decode HTML entities (&quot;, &hellip;) and strip outer whitespace."""
+    """Decode HTML entities and strip outer whitespace."""
     if not isinstance(value, str):
         return None
     return html.unescape(value).strip() or None
@@ -38,7 +32,7 @@ def clean_name(value: Any) -> str | None:
 
 
 def split_title_body(text: Any) -> tuple[str | None, str | None]:
-    """Zembra GET reviews use 'Title\\nBody' in a single `text` field."""
+    """Zembra sends reviews as 'Title\\nBody' in a single `text` field."""
     text = clean_text(text)
     if not text:
         return None, None
@@ -47,190 +41,94 @@ def split_title_body(text: Any) -> tuple[str | None, str | None]:
     if not sep:
         return None, title
 
-    return (title.strip() or None), (body.strip() or None)
+    return title.strip() or None, body.strip() or None
 
 
 def parse_date(value: Any) -> date | None:
-    if not value:
+    if not isinstance(value, str) or not value:
         return None
-
-    if isinstance(value, datetime):
-        return value.date()
-
-    if isinstance(value, date):
-        return value
-
-    if not isinstance(value, str):
-        return None
-
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+        return datetime.fromisoformat(value).date()   # "2026-10-20 00:00:00"
     except ValueError:
         return None
 
 
-
-# Review extraction
-
-
-def extract_reviews(raw: dict) -> list[dict]:
-    data = raw.get("data") or {}
-
-    # GET response: full review list
-    reviews = data.get("reviews")
-    if isinstance(reviews, list):
-        return reviews
-
-    # Fallback: sample reviews embedded in the product page markup
-    target = data.get("target") or {}
-    raw_data = target.get("rawData") or {}
-    reviews = raw_data.get("review")
-
-    return reviews if isinstance(reviews, list) else []
-
+# --------------------------------------------------
+# Review mapping
+# --------------------------------------------------
 
 def map_review(item: dict) -> Review:
-    author_data = item.get("author") or {}
-
-    if isinstance(author_data, str):
-        author_data = {"name": author_data}
-    if not isinstance(author_data, dict):
-        author_data = {}
-
-    author = Author(
-        name=clean_name(author_data.get("name") or item.get("authorName")),
-        location=clean_name(author_data.get("location") or item.get("location")),
-    )
-
-    # Rating: page markup uses reviewRating{}, GET uses a plain `rating`
-    rating_data = item.get("reviewRating")
-    if not isinstance(rating_data, dict):
-        rating_value = item.get("rating")
-        rating_data = (
-            {"ratingValue": rating_value} if rating_value is not None else None
-        )
-
-    review_rating = (
-        ReviewRating.model_validate(rating_data) if rating_data else None
-    )
-
-    # Text: explicit fields first, otherwise split "Title\nBody"
-    title = clean_text(item.get("name") or item.get("title"))
-    body = clean_text(item.get("reviewBody") or item.get("content"))
-
-    if not body:
-        split_title, split_body = split_title_body(item.get("text"))
-        title = title or split_title
-        body = split_body
+    title, body = split_title_body(item.get("text"))
+    author = item.get("author") or {}
 
     return Review(
-        name=title,
-        author=author,
-        reviewBody=body,
-        reviewRating=review_rating,
-        datePublished=(
-            parse_date(item.get("datePublished"))
-            or parse_date(item.get("timestamp"))
-            or parse_date(item.get("date"))
-        ),
+        review_id=item["id"],                      # retrieved from Zembra's response
+        title=title,
+        text=body,
+        author=clean_name(author.get("name")),
+        rating=item.get("rating"),
+        review_date=parse_date(item.get("timestamp")),
     )
 
 
-
-# Rating helpers
-
-def map_product_rating(pr_data: Any) -> ProductRating | None:
-    if not isinstance(pr_data, dict) or not pr_data:
-        return None
-
-    return ProductRating(
-        rating=pr_data.get("rating"),
-        ratingsCount=pr_data.get("ratingsCount"),
-        reviewsCount=pr_data.get("reviewsCount"),
-        parameterRating=[
-            ParameterRating.model_validate(p)
-            for p in (pr_data.get("parameterRating") or [])
-            if isinstance(p, dict)
-        ],
-        individualRatingsCount=[
-            StarCount.model_validate(s)
-            for s in (pr_data.get("individualRatingsCount") or [])
-            if isinstance(s, dict)
-        ],
-    )
-
-
-
+# --------------------------------------------------
 # Main mapper
+# --------------------------------------------------
 
-def map_review_response(raw: dict) -> ReviewResponse:
+def map_review_response(raw: dict, product_id: str) -> ReviewResponse:
     if raw.get("status") != "SUCCESS":
         raise ValueError(raw.get("message", "Zembra request failed"))
 
     data = raw.get("data") or {}
     target = data.get("target") or {}
     raw_data = target.get("rawData") or {}
+    aggregate = raw_data.get("aggregateRating") or {}
 
-    if not raw_data and not data.get("reviews"):
-        raise ReviewsNotReady(
-            "Review data is not available yet. "
-            "The Zembra job may still be processing."
-        )
+    # Fragile provider path: always use .get()
+    pr = (
+        ((raw_data.get("fdpEventTracking") or {}).get("events") or {})
+        .get("psi") or {}
+    ).get("pr") or {}
 
-    # Brand
-    brand_data = raw_data.get("brand")
-    brand = (
-        Brand.model_validate(brand_data) if isinstance(brand_data, dict) else None
-    )
+    reviews: list[Review] = []
+    seen: set[str] = set()
 
-    # Aggregate rating
-    aggregate_data = raw_data.get("aggregateRating")
-    aggregate = (
-        AggregateRating.model_validate(aggregate_data)
-        if isinstance(aggregate_data, dict)
-        else None
-    )
+    for item in data.get("reviews") or []:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue                                # no Zembra id -> skip
+        if item.get("isDeleted") or item.get("isHidden"):
+            continue
 
-    # Product rating breakdown
-    psi = (
-        ((raw_data.get("fdpEventTracking") or {}).get("events") or {}).get("psi")
-        or {}
-    )
-    product_rating = map_product_rating(psi.get("pr"))
+        review = map_review(item)
 
-    # Reviews (skip deleted / hidden)
-    reviews = [
-        map_review(item)
-        for item in extract_reviews(raw)
-        if isinstance(item, dict)
-        and not item.get("isDeleted")
-        and not item.get("isHidden")
-    ]
+        if not (review.title or review.text):
+            continue
+        if review.review_id in seen:
+            continue
 
-    # Total review count
-    total_review_count = (
-        ((target.get("reviewCount") or {}).get("native") or {}).get("total")
-        or (aggregate.reviewCount if aggregate else None)
-    )
+        seen.add(review.review_id)
+        reviews.append(review)
 
-    # Still collecting? Let the caller retry instead of returning a partial list.
-    if total_review_count and len(reviews) < total_review_count:
-        raise ReviewsNotReady(
-            f"Reviews still loading: {len(reviews)}/{total_review_count}"
-        )
-
-    usage_data = data.get("usage") or {}
     return ReviewResponse(
-        title=clean_text(raw_data.get("name")) or clean_text(target.get("name")),
-        description=clean_text(raw_data.get("description")),
-        brand=brand,
-        review=reviews,
-        totalReviewCount=total_review_count,
-        returnedReviewCount=len(reviews),
-        aggregateRating=aggregate,
-        pr=product_rating,
+        product_id=product_id,
+        product_title=clean_text(target.get("name")),
+        brand=(raw_data.get("brand") or {}).get("name"),
+        average_rating=target.get("globalRating") or pr.get("rating"),
+        rating_count=aggregate.get("ratingCount") or pr.get("ratingsCount"),
+        returned_count=len(reviews),
+        rating_distribution={
+            s["ratingValue"]: s["ratingCount"]
+            for s in pr.get("individualRatingsCount") or []
+            if s.get("ratingValue") is not None and s.get("ratingCount") is not None
+        },
+        parameter_ratings={
+            p["parameter"]: p["rating"]
+            for p in pr.get("parameterRating") or []
+            if p.get("parameter") and p.get("rating")
+        },
+        reviews=reviews,
         usage=ZembraUsage(
-            cost=usage_data.get("cost"),
-            balance=usage_data.get("balance"),
-        )
+            cost=(data.get("job") or {}).get("cost"),
+            balance=raw.get("balance"),
+        ),
     )
