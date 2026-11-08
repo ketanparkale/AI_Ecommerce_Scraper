@@ -1,6 +1,6 @@
 from typing import Any
-from agent_service.app.clients.base_scraper_client import BaseScraperClient
-from agent_service.app.models.product_models import ProductResponse
+from app.clients.base_scraper_client import BaseScraperClient
+from app.models.product_models import ProductResponse
 from app.tools.base_tool import BaseTool
 
 class ProductTool(BaseTool):

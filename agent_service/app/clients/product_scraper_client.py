@@ -1,6 +1,6 @@
 import httpx
 from app.config.settings import settings
-from agent_service.app.models.product_models import ProductResponse
+from app.models.product_models import ProductResponse
 from app.clients.base_scraper_client import BaseScraperClient
 
 class ProductScraperClient(BaseScraperClient[ProductResponse]):
