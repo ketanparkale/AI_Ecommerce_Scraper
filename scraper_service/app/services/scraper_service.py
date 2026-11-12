@@ -34,7 +34,7 @@ class ScraperService(Generic[T]):
             except Exception as e:
                 last_err = e
 
-                if not any(k in str(e) for k in RETRYABLE):
+                if not any(str(k) in str(e) for k in RETRYABLE):
                     break
 
                 if i < attempts - 1:
