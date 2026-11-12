@@ -20,3 +20,10 @@ class StoredReview(BaseModel):
     fetched_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
+
+
+class SimilarReview(BaseModel):
+    review: StoredReview
+    score: float = Field(
+        description="Cosine distance returned by Redis vector search."
+    )

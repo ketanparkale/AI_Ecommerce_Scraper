@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from app.rag.review_models import StoredReview
+from app.rag.review_models import SimilarReview, StoredReview
 
 
 class ReviewRepository(ABC):
@@ -31,7 +31,7 @@ class ReviewRepository(ABC):
         limit: int = 5,
         min_rating: float | None = None,
         max_rating: float | None = None
-    ) -> list[StoredReview]:
+    ) -> list[SimilarReview]:
         ...
 
     @abstractmethod

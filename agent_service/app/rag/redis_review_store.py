@@ -10,6 +10,7 @@ from redis.exceptions import ResponseError
 from app.database.redis_client import get_redis
 from app.rag.review_models import StoredReview
 from app.rag.review_repository import ReviewRepository
+from app.rag.review_models import StoredReview, SimilarReview
 
 
 logger = logging.getLogger(__name__)
@@ -128,7 +129,43 @@ class RedisReviewStore(ReviewRepository):
 
         return result
 
+    @staticmethod
+    def _extract_similar_documents(response) -> list[SimilarReview]:
 
+        results = []
+
+        if not isinstance(response, dict):
+            raise TypeError(
+                f"Unexpected Redis response type: {type(response).__name__}"
+            )
+
+        for item in response.get("results", []):
+
+            attributes = item.get("extra_attributes", {})
+
+            document = attributes.get("$")
+            score = attributes.get("score")
+
+            if document is None or score is None:
+                continue
+
+            if isinstance(document, str):
+                document = json.loads(document)
+
+            review = StoredReview.model_validate(document)
+
+            review = review.model_copy(
+                update={"embedding": None}
+            )
+
+            results.append(
+                SimilarReview(
+                    review=review,
+                    score=float(score),
+                )
+            )
+
+        return results
 
     @staticmethod
     def _extract_documents(response) -> list[StoredReview]:
@@ -324,7 +361,7 @@ class RedisReviewStore(ReviewRepository):
             "DIALECT", "2"
         )
 
-        return self._extract_documents(response)
+        return self._extract_similar_documents(response)
 
 
     async def stats(

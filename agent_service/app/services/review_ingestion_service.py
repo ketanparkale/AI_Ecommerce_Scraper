@@ -45,7 +45,7 @@ class ReviewIngestionService:
                 )
                 embedding_index += 1
 
-        # Store reviews in Redis
+        
         await self.review_repository.save_many(reviews)
 
         return len(reviews)

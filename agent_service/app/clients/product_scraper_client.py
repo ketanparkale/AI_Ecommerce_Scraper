@@ -8,7 +8,7 @@ class ProductScraperClient(BaseScraperClient[ProductResponse]):
 
         async with httpx.AsyncClient(timeout=120) as client:
             response = await client.get(
-                f"{settings.scraper_service_url}/scrape",
+                f"{settings.scraper_service_url}/scrape/product",
                 params={
                     "product_url" : product_url
                 }

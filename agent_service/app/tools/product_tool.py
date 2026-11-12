@@ -1,43 +1,30 @@
-from typing import Any
+
+from langchain_core.tools import StructuredTool
+
 from app.clients.base_scraper_client import BaseScraperClient
 from app.models.product_models import ProductResponse
-from app.tools.base_tool import BaseTool
 
-class ProductTool(BaseTool):
 
-    def __init__(self,scraper_client:BaseScraperClient[ProductResponse]):
-        self._client = scraper_client
+def create_product_tool(
+    scraper_client: BaseScraperClient[ProductResponse],
+) -> StructuredTool:
 
-    @property
-    def name(self) -> str:
-        return "get_product_details"
+    async def get_product_details(product_url: str) -> str:
+        """
+        Retrieve product details from a Flipkart product URL,
+        including title, brand, colors, sizes, prices and availability.
+        """
 
-    @property
-    def definition(self) -> dict[str, Any]:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": (
-                    "Retrieve product details from a Flipkart product URL, "
-                    "including the product title, brand, colors, sizes, "
-                    "prices, and availability."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "product_url": {
-                            "type": "string",
-                            "description": "The Flipkart product URL."
-                        }
-                    },
-                    "required": ["product_url"],
-                    "additionalProperties": False
-                },
-                "strict": True
-            }
-        }
+        product = await scraper_client.scrape(product_url)
 
-    async def _run(self, product_url: str) -> str:
-        product = await self._client.execute(product_url)
         return product.model_dump_json(exclude_none=True)
+
+    return StructuredTool.from_function(
+        coroutine=get_product_details,
+        name="get_product_details",
+        description=(
+            "Retrieve product details from a Flipkart product URL, "
+            "including product title, brand, colors, sizes, "
+            "prices and availability."
+        ),
+    )

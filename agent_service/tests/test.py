@@ -1,23 +1,16 @@
-
 import asyncio
 
-from app.llm.local_llm import LocalLLM
+from app.llm.langchain_llm import get_llm
 
 
 async def main():
-    llm = LocalLLM()
+    llm = get_llm()
 
-    response = await llm.generate(
-        messages=[
-            {
-                "role": "user",
-                "content": "Explain what an AI agent is in two sentences."
-            }
-        ]
+    response = await llm.ainvoke(
+        "Explain what an ecommerce product review is in two sentences."
     )
 
-    print("LLM Response:", response.text)
-    print("Tool Calls:", response.tool_calls)
+    print(response.content)
 
 
 if __name__ == "__main__":
