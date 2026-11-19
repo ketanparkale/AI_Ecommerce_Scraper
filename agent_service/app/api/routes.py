@@ -1,17 +1,21 @@
+
 import logging
 from contextlib import asynccontextmanager
-from functools import lru_cache
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException
+from langchain_core.messages import HumanMessage, ToolMessage
+from langgraph.graph.state import CompiledStateGraph
 
 from app.rag.redis_review_store import ensure_review_index
-from app.agents.product_agent import AgentExecutionError, ProductAgent
-from app.clients.product_scraper_client import ProductScraperClient
-from app.clients.review_scraper_client import ReviewScraperClient
 from app.database.redis_client import connect_redis, close_redis, get_redis
-from app.llm.langchain_llm import get_llm
-from app.models.api_models import AgentRequest, AgentResponse
+from app.models.api_models import (
+    AgentRequest,
+    AgentResponse,
+    AgentAnswer,
+)
 from app import dependencies
+
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +23,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_redis()
+
     try:
         await ensure_review_index()
+        await dependencies.initialize_agent_graph()
         yield
     finally:
         await close_redis()
@@ -33,43 +39,80 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-def get_agent(
-    llm = Depends(get_llm),
-) -> ProductAgent:
 
-    tools = [
-        dependencies.get_product_tool(),
-        dependencies.get_review_tool(),
-        dependencies.get_review_search_tool()
-    ]
-
-    return ProductAgent(
-        llm=llm,
-        tools=tools,
-    )
+def get_agent_graph() -> CompiledStateGraph:
+    return dependencies.get_agent_graph()
 
 
 @app.post("/agent/chat", response_model=AgentResponse)
 async def chat(
     request: AgentRequest,
-    agent: ProductAgent = Depends(get_agent),
+    graph: CompiledStateGraph = Depends(get_agent_graph),
 ):
     try:
-        return await agent.run(request.message)
+        print("inside the chat function")
+        conversation_id = request.conversation_id or uuid4()
+        config = {
+            "configurable": {
+                "thread_id": str(conversation_id)
+            },
+            "recursion_limit": 15,
+        }
 
-    except AgentExecutionError:
-        logger.exception("Agent execution failed")
-        raise HTTPException(
-            status_code=502,
-            detail="The AI service could not process the request.",
+        logger.info(
+            "Processing conversation: %s",
+            conversation_id,
+        )
+
+        result = await graph.ainvoke(
+            {
+                "messages": [
+                    HumanMessage(content=request.message)
+                ]
+            },
+            config=config,
+        )
+
+        # Get the structured response from the graph state.
+        structured_answer = result.get("answer")
+
+        if structured_answer is None:
+            answer = AgentAnswer(
+                summary="I couldn't generate an answer. Please try again."
+            )
+
+        else:
+            if hasattr(structured_answer, "model_dump"):
+                structured_answer = structured_answer.model_dump()
+
+            answer = AgentAnswer.model_validate(structured_answer)
+
+        # Collect tool execution results.
+        tool_results = []
+        print("result messages: ", result["messages"])
+        for message in result["messages"]:
+            if isinstance(message, ToolMessage):
+                tool_results.append({
+                    "tool": message.name,
+                    "result": message.content,
+                    "error": message.status == "error",
+                })
+
+        return AgentResponse(
+            conversation_id=conversation_id,
+            answer=answer,
+            tool_results=tool_results,
+            iteration_limit_reached=False,
         )
 
     except Exception:
         logger.exception("Unexpected agent error")
+
         raise HTTPException(
             status_code=500,
             detail="Unable to process request.",
         )
+
 
 @app.get("/redis-health", tags=["Health"])
 async def redis_health():
@@ -81,7 +124,8 @@ async def redis_health():
 
     except Exception:
         logger.exception("Redis health check failed")
+
         raise HTTPException(
             status_code=503,
-            detail="Redis is unavailable"
-        )    
+            detail="Redis is unavailable",
+        )

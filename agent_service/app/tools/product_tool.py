@@ -14,9 +14,7 @@ def create_product_tool(
         Retrieve product details from a Flipkart product URL,
         including title, brand, colors, sizes, prices and availability.
         """
-
         product = await scraper_client.scrape(product_url)
-
         return product.model_dump_json(exclude_none=True)
 
     return StructuredTool.from_function(

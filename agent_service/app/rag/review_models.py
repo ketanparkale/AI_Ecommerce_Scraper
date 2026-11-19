@@ -1,5 +1,5 @@
 from datetime import date, datetime, timezone
-
+from typing import Literal
 from pydantic import BaseModel, Field
 
 
@@ -24,6 +24,13 @@ class StoredReview(BaseModel):
 
 class SimilarReview(BaseModel):
     review: StoredReview
-    score: float = Field(
-        description="Cosine distance returned by Redis vector search."
+
+    score: float | None = Field(
+        default=None,
+        description="Cosine distance from semantic search. None for keyword-only matches."
+    )
+
+    match_type: Literal["semantic", "keyword"] = Field(
+    default="semantic",
+    description="Indicates whether the review was found through semantic or keyword search."
     )

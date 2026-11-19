@@ -1,6 +1,9 @@
 from langchain_openai import ChatOpenAI
 
 
+from langchain_openai import ChatOpenAI
+
+
 def get_llm() -> ChatOpenAI:
     return ChatOpenAI(
         model="mlx-community/Qwen3-4B-4bit",
@@ -8,4 +11,9 @@ def get_llm() -> ChatOpenAI:
         api_key="local",
         temperature=0,
         max_tokens=1500,
+        extra_body={
+            "chat_template_kwargs": {
+                "enable_thinking": False
+            }
+        }
     )

@@ -1,17 +1,16 @@
 import asyncio
+import json
 import logging
 import math
 import re
-import struct   
-import json
+import math
+import struct
 
 from redis.exceptions import ResponseError
 
 from app.database.redis_client import get_redis
-from app.rag.review_models import StoredReview
-from app.rag.review_repository import ReviewRepository
 from app.rag.review_models import StoredReview, SimilarReview
-
+from app.rag.review_repository import ReviewRepository
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +20,7 @@ KEY_PREFIX = "review:"
 EMBEDDING_DIM = 384
 EMBEDDING_ALGORITHM = "FLAT"
 PIPELINE_BATCH_SIZE = 500
-
+REDIS_DATA_TTL = 8 * 60 * 60  # 8 hours
 
 def escape_tag(value: str) -> str:
     """Escape special characters in Redis TAG query values."""
@@ -130,75 +129,84 @@ class RedisReviewStore(ReviewRepository):
         return result
 
     @staticmethod
-    def _extract_similar_documents(response) -> list[SimilarReview]:
+    def _extract_similar_documents(
+        response
+    ) -> list[SimilarReview]:
 
-        results = []
+        similar_reviews = []
 
         if not isinstance(response, dict):
             raise TypeError(
                 f"Unexpected Redis response type: {type(response).__name__}"
             )
 
-        for item in response.get("results", []):
+        # Redis response uses byte keys.
+        results = response.get(b"results", [])
 
-            attributes = item.get("extra_attributes", {})
+        for item in results:
 
-            document = attributes.get("$")
-            score = attributes.get("score")
+            attributes = item.get(b"extra_attributes", {})
+
+            # Extract JSON document and similarity score.
+            document = attributes.get(b"$")
+            score = attributes.get(b"score")
 
             if document is None or score is None:
                 continue
 
-            if isinstance(document, str):
-                document = json.loads(document)
+            # Pydantic can validate JSON directly from bytes.
+            review = StoredReview.model_validate_json(document)
 
-            review = StoredReview.model_validate(document)
-
+            # Embeddings are not required after retrieval.
             review = review.model_copy(
                 update={"embedding": None}
             )
 
-            results.append(
+            similar_reviews.append(
                 SimilarReview(
                     review=review,
-                    score=float(score),
+                    score=float(score)
                 )
             )
 
-        return results
+        return similar_reviews
 
+    
     @staticmethod
     def _extract_documents(response) -> list[StoredReview]:
+        """
+        Extract StoredReview documents from Redis FT.SEARCH responses.
+        """
+
         reviews = []
 
-        # Handle the dictionary response format.
-        if isinstance(response, dict):
-            results = response.get("results", [])
+        # Redis returns dictionary keys as bytes.
+        results = response.get(b"results", [])
 
-            for result in results:
-                extra_attributes = result.get("extra_attributes", {})
+        for result in results:
 
-                # We requested RETURN $ in our FT.SEARCH query.
-                document = extra_attributes.get("$")
+            extra_attributes = result.get(b"extra_attributes", {})
 
-                if document is None:
-                    continue
+            # Extract the JSON document.
+            json_data = extra_attributes.get(b"$")
 
-                # Redis may return the JSON document as a string.
-                if isinstance(document, str):
-                    document = json.loads(document)
+            if not json_data:
+                continue
 
-                review = StoredReview.model_validate(document)
+            # Decode bytes and parse JSON.
+            if isinstance(json_data, bytes):
+                json_data = json_data.decode("utf-8")
 
-                # Don't expose embeddings in search results.
-                review = review.model_copy(
-                    update={"embedding": None}
-                )
+            document = json.loads(json_data)
 
-                reviews.append(review)
+            # Embeddings are not needed when retrieving reviews.
+            document.pop("embedding", None)
 
-            return reviews
+            reviews.append(
+                StoredReview.model_validate(document)
+            )
 
+        return reviews
 
 
     async def save_many(
@@ -245,6 +253,8 @@ class RedisReviewStore(ReviewRepository):
                         review.model_dump_json()
                     )
 
+                    pipe.expire(key, REDIS_DATA_TTL)
+                    
                 await pipe.execute()
 
         logger.info("Saved %d reviews to Redis.", len(reviews))
@@ -282,8 +292,10 @@ class RedisReviewStore(ReviewRepository):
             tokens = re.findall(r"\w+", query)
 
             if tokens:
+                keyword_expression = "|".join(tokens)
+
                 filters.append(
-                    f"@review_text:({' '.join(tokens)})"
+                    f"@review_text:({keyword_expression})"
                 )
 
         search_query = " ".join(filters)
@@ -298,36 +310,15 @@ class RedisReviewStore(ReviewRepository):
             "DIALECT", "2"
         )
 
+    
         return self._extract_documents(response)
 
-
-    async def search_similar(
-        self,
-        product_id: str,
-        embedding: list[float],
-        limit: int = 5,
-        min_rating: float | None = None,
-        max_rating: float | None = None
-    ) -> list[StoredReview]:
-
-        if limit < 1:
-            return []
-
-        if len(embedding) != EMBEDDING_DIM:
-            raise ValueError(
-                f"Expected {EMBEDDING_DIM} embedding dimensions, "
-                f"received {len(embedding)}."
-            )
-
-        if not all(math.isfinite(value) for value in embedding):
-            raise ValueError("Embedding contains invalid numeric values.")
-
-        if (
-            min_rating is not None
-            and max_rating is not None
-            and min_rating > max_rating
-        ):
-            raise ValueError("min_rating cannot exceed max_rating.")
+    async def _count_reviews(
+    self,
+    product_id: str,
+    min_rating: float | None = None,
+    max_rating: float | None = None
+    ) -> int:
 
         filters = [
             self._build_product_filter(product_id)
@@ -337,31 +328,174 @@ class RedisReviewStore(ReviewRepository):
             lower = min_rating if min_rating is not None else "-inf"
             upper = max_rating if max_rating is not None else "+inf"
 
-            filters.append(f"@rating:[{lower} {upper}]")
+            filters.append(
+                f"@rating:[{lower} {upper}]"
+            )
+
+        query = " ".join(filters)
+
+        response = await self.client.execute_command(
+            "FT.AGGREGATE",
+            INDEX_NAME,
+            query,
+            "GROUPBY", "0",
+            "REDUCE", "COUNT", "0", "AS", "total",
+            "DIALECT", "2"
+        )
+
+        # Redis returns a dictionary, not a list.
+        results = response.get(b"results", [])
+
+        if not results:
+            return 0
+
+        attributes = results[0].get(b"extra_attributes", {})
+
+        total = attributes.get(b"total", b"0")
+
+        return int(total)
+
+
+
+    @staticmethod
+    def _extract_projected_documents(response) -> list[SimilarReview]:
+
+        similar_reviews = []
+
+        results = response.get(b"results", [])
+
+        for item in results:
+            attributes = item.get(b"extra_attributes", {})
+
+            def get_value(field):
+                value = attributes.get(field)
+
+                if value is None:
+                    return None
+
+                if isinstance(value, bytes):
+                    return value.decode("utf-8")
+
+                return value
+
+            rating = get_value(b"$.rating")
+            score = get_value(b"score")
+
+            review = StoredReview(
+                review_id=get_value(b"$.review_id"),
+                product_id=get_value(b"$.product_id"),
+                title=get_value(b"$.title"),
+                text=get_value(b"$.text"),
+                author=get_value(b"$.author"),
+                rating=float(rating) if rating is not None else None,
+                review_date=get_value(b"$.review_date"),
+                embedding=None
+            )
+
+            similar_reviews.append(
+                SimilarReview(
+                    review=review,
+                    score=float(score)
+                )
+            )
+
+        return similar_reviews
+
+    async def search_similar(
+        self,
+        product_id: str,
+        embedding: list[float],
+        limit: int = 5,
+        min_rating: float | None = None,
+        max_rating: float | None = None,
+        max_distance: float | None = None
+    ) -> list[SimilarReview]:
+
+        # 1. Validate inputs
+        if limit < 1:
+            return []
+
+        if len(embedding) != EMBEDDING_DIM:
+            raise ValueError(
+                f"Expected {EMBEDDING_DIM} dimensions, "
+                f"received {len(embedding)}."
+            )
+
+        if not all(math.isfinite(value) for value in embedding):
+            raise ValueError("Embedding contains invalid values.")
+
+        if max_distance is not None and not 0 <= max_distance <= 2:
+            raise ValueError("max_distance must be between 0 and 2.")
+
+        # 2. Count eligible reviews for this product
+        candidate_count = await self._count_reviews(
+            product_id=product_id,
+            min_rating=min_rating,
+            max_rating=max_rating
+        )
+
+        if candidate_count == 0:
+            return []
+
+        # 3. Build product and rating filters
+        filters = [
+            self._build_product_filter(product_id)
+        ]
+
+        if min_rating is not None or max_rating is not None:
+            lower = min_rating if min_rating is not None else "-inf"
+            upper = max_rating if max_rating is not None else "+inf"
+
+            filters.append(
+                f"@rating:[{lower} {upper}]"
+            )
 
         filter_query = " ".join(filters)
 
+        # 4. Build KNN query
         search_query = (
             f"({filter_query})"
-            f"=>[KNN {limit} @embedding $vec AS score]"
+            f"=>[KNN {candidate_count} @embedding $vec AS score]"
         )
 
-        vector = struct.pack(f"<{len(embedding)}f", *embedding)
+        # 5. Convert embedding to FLOAT32 bytes
+        vector = struct.pack(
+            f"<{len(embedding)}f",
+            *embedding
+        )
 
+        # 6. Execute Redis vector search
         response = await self.client.execute_command(
             "FT.SEARCH",
             INDEX_NAME,
             search_query,
             "PARAMS", "2",
             "vec", vector,
-            "RETURN", "2",
-            "$", "score",
+            "RETURN", "8",
+            "$.review_id",
+            "$.product_id",
+            "$.title",
+            "$.text",
+            "$.author",
+            "$.rating",
+            "$.review_date",
+            "score",
             "SORTBY", "score", "ASC",
-            "LIMIT", "0", str(limit),
+            "LIMIT", "0", str(candidate_count),
             "DIALECT", "2"
         )
 
-        return self._extract_similar_documents(response)
+        similar_reviews = self._extract_projected_documents(response)
+
+        # Apply distance threshold
+        if max_distance is not None:
+            similar_reviews = [
+                item for item in similar_reviews
+                if item.score <= max_distance
+            ]
+
+        return similar_reviews[:limit]
+
 
 
     async def stats(
@@ -421,3 +555,23 @@ class RedisReviewStore(ReviewRepository):
             "average_rating": average_rating,
             "five_star_reviews": five_star_count
         }
+
+
+
+    async def get_all(
+    self,
+    product_id: str
+    ) -> list[StoredReview]:
+
+        query = self._build_product_filter(product_id)
+
+        response = await self.client.execute_command(
+            "FT.SEARCH",
+            INDEX_NAME,
+            query,
+            "RETURN", "1", "$",
+            "LIMIT", "0", "1000",
+            "DIALECT", "2"
+        )
+
+        return self._extract_documents(response)

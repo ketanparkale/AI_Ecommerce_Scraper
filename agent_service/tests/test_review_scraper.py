@@ -11,15 +11,6 @@ async def test_review_scraper_client():
 
     response = await client.scrape(product_url)
 
-    print("\n========== REVIEW SCRAPER RESPONSE ==========")
-    print(response)
-
-    print("\n========== RESPONSE TYPE ==========")
-    print(type(response))
-
-    print("\n========== RESPONSE KEYS ==========")
-    print(response.keys())
-
 
 if __name__ == "__main__":
     asyncio.run(test_review_scraper_client())

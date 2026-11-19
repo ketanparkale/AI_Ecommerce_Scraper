@@ -92,13 +92,5 @@ async def test_review_ingestion():
 
         assert len(similar_reviews) > 0
 
-        print("\nIngestion test passed!")
-        print(f"Saved reviews: {saved_count}")
-        print(f"Vector search results: {len(similar_reviews)}")
-
-        for review in similar_reviews:
-            print(f"Rating: {review.rating}")
-            print(f"Review: {review.text}")
-
     finally:
         await close_redis()

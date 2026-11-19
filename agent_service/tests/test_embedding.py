@@ -14,10 +14,6 @@ async def main():
 
     embeddings = await embedding_service.embed_texts(reviews)
 
-    print("Number of embeddings:", len(embeddings))
-    print("Dimensions:", len(embeddings[0]))
-    print("First 10 values:", embeddings[0][:10])
-
 
 if __name__ == "__main__":
     asyncio.run(main())
