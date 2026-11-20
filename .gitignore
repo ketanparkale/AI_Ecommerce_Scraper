@@ -20,3 +20,13 @@ env/
 
 # Logs
 *.log
+
+cat >> .gitignore <<'EOF'
+
+# .NET
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+EOF
