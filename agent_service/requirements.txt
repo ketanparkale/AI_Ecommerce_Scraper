@@ -22,6 +22,7 @@ Jinja2==3.1.6
 jiter==0.18.0
 joblib==1.6.0
 jsonpatch==1.38
+jsonpath-ng==1.16.0
 jsonpointer==3.6
 langchain==1.4.9
 langchain-core==1.7.6
@@ -29,12 +30,14 @@ langchain-openai==1.7.4
 langchain-protocol==0.0.20
 langgraph==1.2.18
 langgraph-checkpoint==4.3.1
+langgraph-checkpoint-redis==0.6.0
 langgraph-prebuilt==1.1.1
 langgraph-sdk==0.4.10
 langsmith==0.14.14
 markdown-it-py==4.2.0
 MarkupSafe==3.0.4
 mdurl==0.1.2
+ml_dtypes==0.6.0
 mlx==0.32.4
 mlx-lm==0.32.2
 mlx-metal==0.32.4
@@ -56,8 +59,10 @@ Pygments==2.21.0
 pytest==9.2.0
 pytest-asyncio==1.4.1.post1
 python-dotenv==1.2.4
+python-ulid==4.1.0
 PyYAML==6.0.3
 redis==8.1.0
+redisvl==0.32.0
 regex==2026.9.29
 requests==2.34.2
 requests-toolbelt==1.0.0
