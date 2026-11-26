@@ -1,16 +1,21 @@
 
 using ProductIntelligence.Core.Products.Entities;
 using ProductIntelligence.Core.Products.Interfaces;
+using ProductIntelligence.Core.Common;
 
 namespace ProductIntelligence.Core.Products.Services;
 
 public class ProductService
 {
     private readonly IProductRepository _repository;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public ProductService(IProductRepository repository)
+    public ProductService(
+        IProductRepository repository,
+        IUnitOfWork unitOfWork)
     {
         _repository = repository;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<Product> CreateAsync(
@@ -38,8 +43,8 @@ public class ProductService
             title,
             externalProductId);
 
-        // Save it through the repository.
         await _repository.AddAsync(product, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return product;
     }

@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ProductIntelligence.Core.Notifications.Services;
 
@@ -5,6 +7,7 @@ namespace ProductIntelligence.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class NotificationsController : ControllerBase
 {
     private readonly NotificationService _notificationService;
@@ -15,14 +18,12 @@ public class NotificationsController : ControllerBase
         _notificationService = notificationService;
     }
 
-    // GET: api/notifications?userId={guid}
     [HttpGet]
     public async Task<IActionResult> GetNotifications(
-        [FromQuery] Guid userId,
         CancellationToken cancellationToken)
     {
-        if (userId == Guid.Empty)
-            return BadRequest("A valid userId is required.");
+        if (!TryGetUserId(out var userId))
+            return Unauthorized(new { message = "Valid user identity is missing." });
 
         var notifications =
             await _notificationService.GetUserNotificationsAsync(
@@ -33,15 +34,13 @@ public class NotificationsController : ControllerBase
         return Ok(notifications);
     }
 
-    // PATCH: api/notifications/{notificationId}/read?userId={guid}
     [HttpPatch("{notificationId:guid}/read")]
     public async Task<IActionResult> MarkAsRead(
         Guid notificationId,
-        [FromQuery] Guid userId,
         CancellationToken cancellationToken)
     {
-        if (userId == Guid.Empty)
-            return BadRequest("A valid userId is required.");
+        if (!TryGetUserId(out var userId))
+            return Unauthorized(new { message = "Valid user identity is missing." });
 
         var success = await _notificationService.MarkAsReadAsync(
             notificationId,
@@ -53,5 +52,19 @@ public class NotificationsController : ControllerBase
             return NotFound("Notification not found.");
 
         return NoContent();
+    }
+
+    private bool TryGetUserId(out Guid userId)
+    {
+        userId = Guid.Empty;
+
+        var claim = User.FindFirst(ClaimTypes.NameIdentifier)
+            ?? User.FindFirst("nameid")
+            ?? User.FindFirst("sub")
+            ?? User.FindFirst("UserId");
+
+        return claim is not null
+            && Guid.TryParse(claim.Value, out userId)
+            && userId != Guid.Empty;
     }
 }

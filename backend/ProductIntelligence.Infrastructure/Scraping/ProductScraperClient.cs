@@ -18,7 +18,7 @@ public class ProductScraperClient : IProductScraperClient
         CancellationToken cancellationToken = default)
     {
         var response = await _httpClient.GetAsync(
-            $"scrape?product_url={Uri.EscapeDataString(productUrl)}",
+            $"scrape/product?product_url={Uri.EscapeDataString(productUrl)}",
             cancellationToken
         );
 

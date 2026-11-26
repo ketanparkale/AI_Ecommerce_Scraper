@@ -1,4 +1,6 @@
 
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ProductIntelligence.Core.Watches.DTOs;
 using ProductIntelligence.Core.Watches.Services;
@@ -7,6 +9,7 @@ namespace ProductIntelligence.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class ProductWatchesController : ControllerBase
 {
     private readonly ProductWatchService _watchService;
@@ -18,10 +21,12 @@ public class ProductWatchesController : ControllerBase
 
     [HttpPost]
     public async Task<IActionResult> CreateWatch(
-        [FromQuery] Guid userId,
         [FromBody] CreateProductWatchRequestDto request,
         CancellationToken cancellationToken)
     {
+        if (!TryGetUserId(out var userId))
+            return Unauthorized(new { message = "Valid user identity is missing." });
+
         try
         {
             var watchId = await _watchService.CreateWatchAsync(
@@ -46,11 +51,10 @@ public class ProductWatchesController : ControllerBase
 
     [HttpGet]
     public async Task<IActionResult> GetUserWatches(
-        [FromQuery] Guid userId,
         CancellationToken cancellationToken)
     {
-        if (userId == Guid.Empty)
-            return BadRequest(new { message = "Invalid user ID." });
+        if (!TryGetUserId(out var userId))
+            return Unauthorized(new { message = "Valid user identity is missing." });
 
         var watches = await _watchService.GetUserWatchesAsync(
             userId,
@@ -63,9 +67,11 @@ public class ProductWatchesController : ControllerBase
     [HttpPatch("{watchId:guid}/pause")]
     public async Task<IActionResult> PauseWatch(
         Guid watchId,
-        [FromQuery] Guid userId,
         CancellationToken cancellationToken)
     {
+        if (!TryGetUserId(out var userId))
+            return Unauthorized(new { message = "Valid user identity is missing." });
+
         var success = await _watchService.PauseWatchAsync(
             watchId,
             userId,
@@ -80,9 +86,11 @@ public class ProductWatchesController : ControllerBase
     [HttpPatch("{watchId:guid}/resume")]
     public async Task<IActionResult> ResumeWatch(
         Guid watchId,
-        [FromQuery] Guid userId,
         CancellationToken cancellationToken)
     {
+        if (!TryGetUserId(out var userId))
+            return Unauthorized(new { message = "Valid user identity is missing." });
+
         var success = await _watchService.ResumeWatchAsync(
             watchId,
             userId,
@@ -97,9 +105,11 @@ public class ProductWatchesController : ControllerBase
     [HttpDelete("{watchId:guid}")]
     public async Task<IActionResult> DeleteWatch(
         Guid watchId,
-        [FromQuery] Guid userId,
         CancellationToken cancellationToken)
     {
+        if (!TryGetUserId(out var userId))
+            return Unauthorized(new { message = "Valid user identity is missing." });
+
         var success = await _watchService.DeleteWatchAsync(
             watchId,
             userId,
@@ -109,5 +119,19 @@ public class ProductWatchesController : ControllerBase
             return NotFound(new { message = "Product watch not found." });
 
         return NoContent();
+    }
+
+    private bool TryGetUserId(out Guid userId)
+    {
+        userId = Guid.Empty;
+
+        var claim = User.FindFirst(ClaimTypes.NameIdentifier)
+            ?? User.FindFirst("nameid")
+            ?? User.FindFirst("sub")
+            ?? User.FindFirst("UserId");
+
+        return claim is not null
+            && Guid.TryParse(claim.Value, out userId)
+            && userId != Guid.Empty;
     }
 }

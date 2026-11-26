@@ -1,0 +1,35 @@
+
+services:
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: product-intelligence-sql
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${SQL_SERVER_PASSWORD}
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    restart: unless-stopped
+
+  redis:
+    image: redis/redis-stack:latest
+    container_name: ecommerce-redis
+    ports:
+      - "6379:6379"
+      - "8001:8001"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  sqlserver_data:
+    external: true
+    name: product-intelligence-data
+
+  redis_data:
+    external: true
+    name: agent_service_redis_data

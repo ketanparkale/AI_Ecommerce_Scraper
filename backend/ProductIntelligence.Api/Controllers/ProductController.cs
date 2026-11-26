@@ -1,4 +1,5 @@
 
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ProductIntelligence.Core.Products.DTOs;
 using ProductIntelligence.Core.Products.Services;
@@ -7,17 +8,66 @@ namespace ProductIntelligence.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class ProductsController : ControllerBase
 {
     private readonly ProductService _productService;
     private readonly ProductMonitoringService _monitoringService;
+    private readonly ProductResolutionService _resolutionService;
+    private readonly ILogger<ProductsController> _logger;
 
     public ProductsController(
         ProductService productService,
-        ProductMonitoringService monitoringService)
+        ProductMonitoringService monitoringService,
+        ProductResolutionService resolutionService,
+        ILogger<ProductsController> logger)
     {
         _productService = productService;
         _monitoringService = monitoringService;
+        _resolutionService = resolutionService;
+        _logger = logger;
+    }
+
+    [HttpPost("resolve")]
+    [ProducesResponseType(typeof(ResolvedProductResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<ActionResult<ResolvedProductResponse>> ResolveProduct(
+        [FromBody] ResolveProductRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _resolutionService.ResolveAsync(
+                request.ProductUrl,
+                cancellationToken);
+
+            return Ok(result);
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+        catch (HttpRequestException exception)
+        {
+            _logger.LogError(exception, "Unable to retrieve product information from the scraper service.");
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                new { message = "Unable to retrieve product information from the scraper service." });
+        }
+        catch (InvalidOperationException exception)
+        {
+            _logger.LogError(
+                exception,
+                "Product resolution failed.");
+
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                new
+                {
+                    message = "Unable to resolve product information."
+                });
+        }
     }
 
     [HttpPost]
